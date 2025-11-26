@@ -46,8 +46,6 @@ if __name__ == "__main__":
         # allow_reuse_address нужен для быстрого перезапуска без ошибки "Address already in use"
         socketserver.TCPServer.allow_reuse_address = True
         with socketserver.TCPServer(("", PORT), RequestHandler) as httpd:
-            # print используем только для отладки при ручном запуске, systemd направит это в journal
-            print(f"Server started on port {PORT}")
             httpd.serve_forever()
     except KeyboardInterrupt:
         pass

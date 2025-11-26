@@ -34,6 +34,7 @@ wait_for_service() {
     
     while [ $elapsed -lt $wait_seconds ]; do
         if http_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$TARGET_URL" 2>/dev/null) && [ "$http_code" -eq 200 ]; then
+            log "INFO" "Service started on port $APP_PORT."
             return 0
         fi
         sleep 1
