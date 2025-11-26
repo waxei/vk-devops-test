@@ -1,98 +1,81 @@
-# Переменные установки
+# Переменные
 INSTALL_DIR = /opt/test-monitoring
 CONFIG_DIR = /etc/monitoring
 LOG_DIR = /var/log/test-monitoring
 SERVICE_USER = monitoring-user
 
-.PHONY: all install uninstall
+# Определяем путь к python3 один раз
+PYTHON_BIN := $(shell command -v python3 2>/dev/null)
+
+.PHONY: all install uninstall check-deps
 
 all:
 	@echo "Доступные команды:"
-	@echo "  make install   - Установить приложение и мониторинг"
+	@echo "  make install   - Установить сервис и мониторинг"
 	@echo "  make uninstall - Удалить все компоненты"
 
-install:
+# Отдельный таргет для проверки зависимостей (вызывается перед install)
+check-deps:
+	@echo "Проверка зависимостей..."
+	@command -v curl >/dev/null 2>&1 || { echo "ERROR: 'curl' не найден. Установите его вручную."; exit 1; }
+	@command -v python3 >/dev/null 2>&1 || { echo "ERROR: 'python3' не найден. Установите его вручную."; exit 1; }
+	@echo "Зависимости OK."
+
+install: check-deps
 	@echo "=== Начало установки ==="
 	
-	# 0. Зависимости: Проверяем и устанавливаем curl (необходим для мониторинга)
-	@CURL_PATH=$$(command -v curl 2>/dev/null || echo ""); \
-	if [ -z "$$CURL_PATH" ]; then \
-		echo "curl не найден, устанавливаем..."; \
-		if command -v apt-get >/dev/null 2>&1; then \
-			apt-get update && apt-get install -y curl; \
-		elif command -v yum >/dev/null 2>&1; then \
-			yum install -y curl; \
-		elif command -v dnf >/dev/null 2>&1; then \
-			dnf install -y curl; \
-		else \
-			echo "ERROR: Не удалось определить менеджер пакетов. Установите curl вручную."; \
-			exit 1; \
-		fi; \
-		CURL_PATH=$$(command -v curl 2>/dev/null || echo ""); \
-		if [ -z "$$CURL_PATH" ]; then \
-			echo "ERROR: curl не установлен после попытки установки!"; \
-			exit 1; \
-		fi; \
-		echo "curl успешно установлен: $$CURL_PATH"; \
-	else \
-		echo "curl уже установлен: $$CURL_PATH"; \
-	fi
+	# 1. Безопасность: Создаем пользователя (если нет)
+	@getent passwd $(SERVICE_USER) >/dev/null 2>&1 || \
+		(useradd -r -s /bin/false $(SERVICE_USER) && echo "Пользователь $(SERVICE_USER) создан")
 	
-	# 1. Безопасность: Создаем системного пользователя без домашней папки
-	@if ! id -u $(SERVICE_USER) &>/dev/null; then \
-		echo "Создаем пользователя $(SERVICE_USER)..."; \
-		useradd -r -s /bin/false $(SERVICE_USER) || { echo "ERROR: Не удалось создать пользователя $(SERVICE_USER)"; exit 1; }; \
-	else \
-		echo "Пользователь $(SERVICE_USER) уже существует"; \
-	fi
-	@if ! id -u $(SERVICE_USER) &>/dev/null; then \
-		echo "ERROR: Пользователь $(SERVICE_USER) не существует после создания!"; \
-		exit 1; \
-	fi
-	
-	# 2. Структура: Создаем директории
+	# 2. Структура
 	mkdir -p $(INSTALL_DIR)
 	mkdir -p $(CONFIG_DIR)
 	mkdir -p $(LOG_DIR)
 	
-	# 3. Файлы: Копируем скрипты и конфиг
+	# 3. Копирование файлов
+	# ВАЖНО: Убедись, что локальный файл называется app.py или webapp.py
 	cp app.py $(INSTALL_DIR)/
 	cp monitor.sh $(INSTALL_DIR)/
 	cp config.env $(CONFIG_DIR)/
 	
-	# 4. Права: Настраиваем владельцев и права исполнения
+	# 4. Права доступа
 	chmod +x $(INSTALL_DIR)/*.py $(INSTALL_DIR)/*.sh
 	chown -R $(SERVICE_USER):$(SERVICE_USER) $(INSTALL_DIR)
 	chown -R $(SERVICE_USER):$(SERVICE_USER) $(LOG_DIR)
 	
-	# 5. Logrotate: Создаем конфиг ротации логов (чтобы диск не переполнился)
-	@echo "$(LOG_DIR)/*.log {\n  daily\n  rotate 7\n  compress\n  missingok\n  notifempty\n  create 0640 $(SERVICE_USER) $(SERVICE_USER)\n}" > /etc/logrotate.d/test-monitoring
+	# 5. Logrotate (используем printf для надежности переноса строк)
+	@printf "$(LOG_DIR)/*.log {\n  daily\n  rotate 7\n  compress\n  missingok\n  notifempty\n  create 0640 $(SERVICE_USER) $(SERVICE_USER)\n}\n" > /etc/logrotate.d/test-monitoring
 	
-	# 6. Systemd: Генерируем сервис приложения
-	@echo "[Unit]\nDescription=Simple Hello World App\nAfter=network.target\n\n[Service]\nExecStart=/usr/bin/python3 $(INSTALL_DIR)/app.py\nEnvironmentFile=$(CONFIG_DIR)/config.env\nUser=$(SERVICE_USER)\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target" > /etc/systemd/system/test-app.service
+	# 6. Создание сервисов Systemd
+	# Сервис приложения
+	@printf "[Unit]\nDescription=Simple Hello World App\nAfter=network.target\n\n[Service]\nExecStart=$(PYTHON_BIN) $(INSTALL_DIR)/app.py\nEnvironmentFile=$(CONFIG_DIR)/config.env\nUser=$(SERVICE_USER)\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n" > /etc/systemd/system/test-app.service
 	
-	# 7. Systemd: Генерируем сервис мониторинга
-	# Запускаем от root, так как ему нужно право делать systemctl restart другого сервиса
-	@echo "[Unit]\nDescription=Monitor for Web App\nAfter=test-app.service\n\n[Service]\nExecStart=$(INSTALL_DIR)/monitor.sh\nEnvironmentFile=$(CONFIG_DIR)/config.env\nUser=root\nRestart=always\n\n[Install]\nWantedBy=multi-user.target" > /etc/systemd/system/test-monitor.service
+	# Сервис мониторинга
+	@printf "[Unit]\nDescription=Monitor for Web App\nAfter=test-app.service\n\n[Service]\nExecStart=$(INSTALL_DIR)/monitor.sh\nEnvironmentFile=$(CONFIG_DIR)/config.env\nUser=root\nRestart=always\n\n[Install]\nWantedBy=multi-user.target\n" > /etc/systemd/system/test-monitor.service
 	
-	# 8. Запуск: Перечитываем конфиги и стартуем
+	# 7. Запуск и применение
 	systemctl daemon-reload
 	systemctl enable test-app test-monitor
 	systemctl restart test-app test-monitor
 	
-	@echo "=== Установка/Обновление завершено ==="
-	@echo "Проверка статуса: systemctl status test-monitor"
+	@echo "=== Установка завершена ==="
+	@echo "Статус: systemctl status test-monitor"
 
 uninstall:
 	@echo "=== Удаление системы ==="
 	systemctl stop test-app test-monitor || true
 	systemctl disable test-app test-monitor || true
+	
 	rm -f /etc/systemd/system/test-app.service
 	rm -f /etc/systemd/system/test-monitor.service
 	rm -f /etc/logrotate.d/test-monitoring
+	
+	systemctl daemon-reload
+	
 	rm -rf $(INSTALL_DIR)
-	# Конфиги и логи опционально можно оставить, но для чистоты удалим
 	rm -rf $(CONFIG_DIR)
 	rm -rf $(LOG_DIR)
-	systemctl daemon-reload
-	@echo "=== Система удалена ==="
+	
+	userdel $(SERVICE_USER) || true
+	@echo "=== Система очищена ==="
