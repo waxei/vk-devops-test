@@ -59,7 +59,7 @@ while true; do
             log "INFO" "Restart command executed."
             
             # Даем сервису время на старт
-            sleep 5
+            sleep 10
             
             # Проверяем успешность рестарта: статус сервиса должен быть active
             if systemctl is-active --quiet "$SERVICE_NAME"; then
