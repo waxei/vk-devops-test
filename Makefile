@@ -48,8 +48,8 @@ install: check-deps
 	@printf "$(LOG_DIR)/*.log {\n  daily\n  rotate 7\n  compress\n  missingok\n  notifempty\n  create 0640 $(SERVICE_USER) $(SERVICE_USER)\n}\n" > /etc/logrotate.d/test-monitoring
 	
 	# 6. Создание сервисов Systemd
-	# Сервис приложения (перенаправляем stdout/stderr в лог-файл мониторинга)
-	@printf "[Unit]\nDescription=Simple Hello World App\nAfter=network.target\n\n[Service]\nExecStart=$(PYTHON_BIN) $(INSTALL_DIR)/app.py\nEnvironmentFile=$(CONFIG_DIR)/config.env\nUser=$(SERVICE_USER)\nRestart=on-failure\nStandardOutput=append:$(LOG_DIR)/monitor.log\nStandardError=append:$(LOG_DIR)/monitor.log\n\n[Install]\nWantedBy=multi-user.target\n" > /etc/systemd/system/test-app.service
+	# Сервис приложения
+	@printf "[Unit]\nDescription=Simple Hello World App\nAfter=network.target\n\n[Service]\nExecStart=$(PYTHON_BIN) $(INSTALL_DIR)/app.py\nEnvironmentFile=$(CONFIG_DIR)/config.env\nUser=$(SERVICE_USER)\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n" > /etc/systemd/system/test-app.service
 	
 	# Сервис мониторинга
 	@printf "[Unit]\nDescription=Monitor for Web App\nAfter=test-app.service\n\n[Service]\nExecStart=$(INSTALL_DIR)/monitor.sh\nEnvironmentFile=$(CONFIG_DIR)/config.env\nUser=root\nRestart=always\n\n[Install]\nWantedBy=multi-user.target\n" > /etc/systemd/system/test-monitor.service
