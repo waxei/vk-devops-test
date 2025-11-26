@@ -27,6 +27,27 @@ log() {
 
 log "INFO" "Monitoring started. Target: $TARGET_URL"
 
+# Функция ожидания готовности сервиса при старте (без логирования ошибок)
+wait_for_service() {
+    local wait_seconds=5  # Ждем 5 секунд
+    local elapsed=0
+    
+    while [ $elapsed -lt $wait_seconds ]; do
+        if http_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$TARGET_URL" 2>/dev/null) && [ "$http_code" -eq 200 ]; then
+            return 0
+        fi
+        sleep 1
+        ((elapsed++))
+    done
+    
+    # Если не дождались, логируем предупреждение и продолжаем
+    log "WARN" "Service not ready after $wait_seconds seconds. Starting monitoring anyway."
+    return 1
+}
+
+# Ждем готовности сервиса перед началом мониторинга
+wait_for_service
+
 # Бесконечный цикл проверки
 while true; do
     # curl: -s (silent), -o /dev/null (без тела), -w (код ответа), таймаут 5 сек
@@ -59,7 +80,7 @@ while true; do
             log "INFO" "Restart command executed."
             
             # Даем сервису время на старт
-            sleep 10
+            sleep 5
             
             # Проверяем успешность рестарта: статус сервиса должен быть active
             if systemctl is-active --quiet "$SERVICE_NAME"; then
