@@ -15,24 +15,40 @@ install:
 	@echo "=== Начало установки ==="
 	
 	# 0. Зависимости: Проверяем и устанавливаем curl (необходим для мониторинга)
-	@if ! command -v curl &> /dev/null; then \
+	@CURL_PATH=$$(command -v curl 2>/dev/null || echo ""); \
+	if [ -z "$$CURL_PATH" ]; then \
 		echo "curl не найден, устанавливаем..."; \
-		if command -v apt-get &> /dev/null; then \
+		if command -v apt-get >/dev/null 2>&1; then \
 			apt-get update && apt-get install -y curl; \
-		elif command -v yum &> /dev/null; then \
+		elif command -v yum >/dev/null 2>&1; then \
 			yum install -y curl; \
-		elif command -v dnf &> /dev/null; then \
+		elif command -v dnf >/dev/null 2>&1; then \
 			dnf install -y curl; \
 		else \
 			echo "ERROR: Не удалось определить менеджер пакетов. Установите curl вручную."; \
 			exit 1; \
 		fi; \
+		CURL_PATH=$$(command -v curl 2>/dev/null || echo ""); \
+		if [ -z "$$CURL_PATH" ]; then \
+			echo "ERROR: curl не установлен после попытки установки!"; \
+			exit 1; \
+		fi; \
+		echo "curl успешно установлен: $$CURL_PATH"; \
 	else \
-		echo "curl уже установлен"; \
+		echo "curl уже установлен: $$CURL_PATH"; \
 	fi
 	
 	# 1. Безопасность: Создаем системного пользователя без домашней папки
-	@id -u $(SERVICE_USER) &>/dev/null || useradd -r -s /bin/false $(SERVICE_USER)
+	@if ! id -u $(SERVICE_USER) &>/dev/null; then \
+		echo "Создаем пользователя $(SERVICE_USER)..."; \
+		useradd -r -s /bin/false $(SERVICE_USER) || { echo "ERROR: Не удалось создать пользователя $(SERVICE_USER)"; exit 1; }; \
+	else \
+		echo "Пользователь $(SERVICE_USER) уже существует"; \
+	fi
+	@if ! id -u $(SERVICE_USER) &>/dev/null; then \
+		echo "ERROR: Пользователь $(SERVICE_USER) не существует после создания!"; \
+		exit 1; \
+	fi
 	
 	# 2. Структура: Создаем директории
 	mkdir -p $(INSTALL_DIR)
